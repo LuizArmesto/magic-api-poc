@@ -147,7 +147,10 @@ class ResourcesMaker(object):
             '_uid': restful_fields.Integer  # Internal id
         }
         for field in resource_metadata.schema.get('fields', []):
-            fields[to_underscore(field.get('name'))] = get_field_type(field)
+            args = []
+            kwargs = {'attribute': to_underscore(field.get('name'))}
+            fields[to_camelcase(field.get('name'), False)] = \
+                get_field_type(field)(*args, **kwargs)
 
         # Create Resource List class
         list_parser = RequestParser()

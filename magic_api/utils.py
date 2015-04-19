@@ -12,9 +12,12 @@ def normalize_name(value):
                    if c.isalnum() or c.isspace() or c in ['_', '-'])
 
 
-def to_camelcase(value):
+def to_camelcase(value, uppercase_first_letter=True):
     value = normalize_name(value)
-    return ''.join(c for c in value.title().strip() if not c.isspace())
+    result = ''.join(c for c in value.title().strip() if not c.isspace())
+    if not uppercase_first_letter:
+        result = '{}{}'.format(result[0].lower(), result[1:])
+    return result
 
 
 def to_underscore(value):

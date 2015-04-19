@@ -150,13 +150,6 @@ class Base(object):
             if hasattr(self, attr_name):
                 setattr(self, attr_name, value)
 
-    def as_dict(self):
-        result = {}
-        for column in self.__table__.columns:
-            name = column.name
-            result[name] = getattr(self, name)
-        return result
-
 
 class ModelsMaker(object):
     def __init__(self, datapackage, session=None, table_prefix=None,
