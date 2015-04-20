@@ -142,29 +142,62 @@ class ResourcesMaker(object):
         resource_name = resource_metadata.name
         classname = to_camelcase(resource_name)
 
+        # Create Resource List class
+        list_parser = RequestParser()
+        # Expect pagination arguments
+        list_parser.add_argument('page', type=int, default=0)
+        list_parser.add_argument('per_page', type=int, default=100)
+
         session = self.session
         fields = {
             '_uid': restful_fields.Integer  # Internal id
         }
         for field in resource_metadata.schema.get('fields', []):
+            # JSON properties names are camelCase
+            property_name = to_camelcase(field.get('name'), False)
+            # but SQLAlchemy columns are snake_case
+            column_name = to_underscore(field.get('name'))
+            # Add a filter argument for each column
+            list_parser.add_argument(property_name, action='append')
+            # Map JSON properties to SQLAlchemy columns
             args = []
-            kwargs = {'attribute': to_underscore(field.get('name'))}
-            fields[to_camelcase(field.get('name'), False)] = \
-                get_field_type(field)(*args, **kwargs)
+            kwargs = {'attribute': column_name}
+            fields[property_name] = get_field_type(field)(*args, **kwargs)
 
-        # Create Resource List class
-        list_parser = RequestParser()
-        # Expect pagination arguments
-        list_parser.add_argument('page', type=int, default=0)
-        list_parser.add_argument('per_page_num', type=int, default=100)
+        def compile_query(query):
+            from sqlalchemy.sql import compiler
+
+            dialect = query.session.bind.dialect
+            comp = compiler.SQLCompiler(dialect, query.statement)
+            comp.compile()
+            params = []
+            for k in comp.positiontup:
+                v = comp.params[k]
+                if isinstance(v, unicode):
+                    v = v.encode(dialect.encoding)
+                params.append(v)
+            return (comp.string.encode(dialect.encoding), tuple(params))
 
         @restful.marshal_with(fields)
         def get_list(self):
+            model = self.__model__
             args = list_parser.parse_args()
-            query = session.query(self.__model__)
+            query = session.query(model)
+            # Filters
+            for field in resource_metadata.schema.get('fields', []):
+                # JSON properties names are camelCase
+                property_name = to_camelcase(field.get('name'), False)
+                # but SQLAlchemy columns are snake_case
+                column_name = to_underscore(field.get('name'))
+                # Get the argument value from URL query, if any
+                values = args[property_name]
+                if values is not None:
+                    query = query.filter(getattr(getattr(model, column_name), 'in_')(values))
             # Pagination
-            query = query.offset(args['page'] * args['per_page_num'])
-            query = query.limit(args['per_page_num'])
+            query = query.offset(args['page'] * args['per_page'])
+            query = query.limit(args['per_page'])
+
+            print "*** Query ***\n\n", compile_query(query), '\n'
             # Filter
             result = query.all()
             return result
