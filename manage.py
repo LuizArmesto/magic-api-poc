@@ -10,6 +10,7 @@ from magic_api.api import ResourcesMaker
 
 manager = Manager(create_app)
 manager.add_option('-i', '--inst', dest='instance_folder', required=False)
+manager.add_option('-b', '--backend', dest='backend', required=False)
 manager.add_option('-d', '--datapackage', dest='datapackage', required=True)
 
 
@@ -37,7 +38,7 @@ def initdb():
 def importdata():
     """Import the data to the database."""
     with manager.app.app_context():
-        manager.app._resources_maker.models_maker.populate(session=db.session)
+        manager.app._resources_maker.models_maker.populate()
 
 
 if __name__ == "__main__":

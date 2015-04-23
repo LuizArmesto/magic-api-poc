@@ -9,6 +9,7 @@ from flask.ext.cors import CORS
 from .config import DefaultConfig, INSTANCE_FOLDER_PATH
 from .extensions import db
 from ..api import magic_api, ResourcesMaker
+from ..dal.backends import SQLAlchemyBackend
 
 # For import *
 __all__ = ['create_app']
@@ -16,12 +17,14 @@ __all__ = ['create_app']
 DEFAULT_BLUEPRINTS = []
 
 
-def create_app(config=None, app_name=None, datapackage=None,
+def create_app(config=None, app_name=None, datapackage=None, backend=None,
                instance_folder=None, blueprints=None):
     """Create a Flask app."""
 
     if app_name is None:
         app_name = DefaultConfig.PROJECT
+    if backend is None:
+        backend = 'SQLAlchemy'
     if blueprints is None:
         blueprints = DEFAULT_BLUEPRINTS
     if instance_folder is None:
@@ -37,7 +40,7 @@ def create_app(config=None, app_name=None, datapackage=None,
     configure_logging(app)
     #configure_error_handlers(app)
     configure_cors(app)
-    configure_resources(app, datapackage)
+    configure_resources(app, datapackage, backend)
 
     return app
 
@@ -136,12 +139,14 @@ def configure_cors(app):
     cors = CORS(app, resources={r"*": {"origins": "*"}})
 
 
-def configure_resources(app, datapackage):
+def configure_resources(app, datapackage, backend):
     """Configure the automatic API resources maker."""
     with app.app_context():
-        resources_maker = ResourcesMaker(datapackage,
-                                         session=db.session,
-                                         metadata=db.metadata)
+        if backend == 'SQLAlchemy':
+            backend = SQLAlchemyBackend(db.session, db.metadata)
+        else:
+            raise RuntimeError()
+        resources_maker = ResourcesMaker(datapackage, backend)
         resources_maker.create_resources()
 
     app.register_blueprint(magic_api)

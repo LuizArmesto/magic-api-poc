@@ -9,8 +9,9 @@ from flask.ext.restful.reqparse import RequestParser
 
 from datapackage import DataPackage
 
-from .db import ModelsMaker
+from .dal.model import ModelsMaker
 from .utils import to_camelcase, to_underscore
+from .utils import get_type as get_field_type
 
 # For import *
 __all__ = ['magic_api', 'ResourcesMaker', 'add_resource']
@@ -87,13 +88,6 @@ SINGLE = 0
 LIST = 1
 
 
-def get_field_type(field):
-    type_ = field.get('type')
-    format_ = field.get('format', 'default')
-    formats = TYPES.get(type_, {})
-    return formats.get(format_) or formats.get('default')
-
-
 def add_resource(cls, datapackage, resource_name, type_=LIST):
     datapackage_name = to_underscore(datapackage.name)
     resource_name = to_underscore(resource_name)
@@ -105,12 +99,11 @@ def add_resource(cls, datapackage, resource_name, type_=LIST):
 
 
 class ResourcesMaker(object):
-    def __init__(self, datapackage, session, metadata=None):
+    def __init__(self, datapackage, databackend):
         if isinstance(datapackage, basestring):
             datapackage = DataPackage(unicode(datapackage))
         self.datapackage = datapackage
-        self.session = session
-        self.models_maker = ModelsMaker(datapackage, metadata=metadata)
+        self.models_maker = ModelsMaker(datapackage, backend=databackend)
         self._resources = {}
 
     @property
@@ -148,7 +141,6 @@ class ResourcesMaker(object):
         list_parser.add_argument('page', type=int, default=0)
         list_parser.add_argument('per_page', type=int, default=100)
 
-        session = self.session
         fields = {
             '_uid': restful_fields.Integer  # Internal id
         }
@@ -162,27 +154,14 @@ class ResourcesMaker(object):
             # Map JSON properties to SQLAlchemy columns
             args = []
             kwargs = {'attribute': column_name}
-            fields[property_name] = get_field_type(field)(*args, **kwargs)
-
-        def compile_query(query):
-            from sqlalchemy.sql import compiler
-
-            dialect = query.session.bind.dialect
-            comp = compiler.SQLCompiler(dialect, query.statement)
-            comp.compile()
-            params = []
-            for k in comp.positiontup:
-                v = comp.params[k]
-                if isinstance(v, unicode):
-                    v = v.encode(dialect.encoding)
-                params.append(v)
-            return (comp.string.encode(dialect.encoding), tuple(params))
+            fields[property_name] = get_field_type(TYPES, field)(*args,
+                                                                 **kwargs)
 
         @restful.marshal_with(fields)
         def get_list(self):
             model = self.__model__
             args = list_parser.parse_args()
-            query = session.query(model)
+            query = model.queryset
             # Filters
             for field in resource_metadata.schema.get('fields', []):
                 # JSON properties names are camelCase
@@ -192,13 +171,11 @@ class ResourcesMaker(object):
                 # Get the argument value from URL query, if any
                 values = args[property_name]
                 if values is not None:
-                    query = query.filter(getattr(getattr(model, column_name), 'in_')(values))
+                    query = query.in_(**{column_name: values})
             # Pagination
             query = query.offset(args['page'] * args['per_page'])
             query = query.limit(args['per_page'])
 
-            print "*** Query ***\n\n", compile_query(query), '\n'
-            # Filter
             result = query.all()
             return result
 
@@ -211,7 +188,8 @@ class ResourcesMaker(object):
         # Create Resource Single class
         @restful.marshal_with(fields)
         def get_single(self, pk):
-            query = session.query(self.__model__)
+            model = self.__model__
+            query = model.queryset
             result = query.get(pk)
             return result
 
