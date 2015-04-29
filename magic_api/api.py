@@ -17,7 +17,7 @@ from .utils import get_type as get_field_type
 __all__ = ['magic_api', 'ResourcesMaker', 'add_resource']
 
 
-API_PREFIX = "/api"
+API_PREFIX = '/api'
 
 
 # Blueprint for MagicAPI
@@ -98,6 +98,26 @@ def add_resource(cls, datapackage, resource_name, type_=LIST):
     magic_api_base.add_resource(cls, url)
 
 
+def filter_dict(dict_, keys):
+    remove = []
+    result = {}
+
+    for key in keys:
+        if key.startswith('-'):
+            remove.append(key)
+        elif key in dict_:
+            result[key] = dict_[key]
+
+    result = result or dict_.copy()
+
+    for key in remove:
+        key = key[1:]
+        if key in result:
+            del result[key]
+
+    return result
+
+
 class ResourcesMaker(object):
     def __init__(self, datapackage, databackend):
         if isinstance(datapackage, basestring):
@@ -137,9 +157,6 @@ class ResourcesMaker(object):
 
         # Create Resource List class
         list_parser = RequestParser()
-        # Expect pagination arguments
-        list_parser.add_argument('page', type=int, default=0)
-        list_parser.add_argument('per_page', type=int, default=100)
 
         fields = {
             '_uid': restful_fields.Integer  # Internal id
@@ -157,11 +174,16 @@ class ResourcesMaker(object):
             fields[property_name] = get_field_type(TYPES, field)(*args,
                                                                  **kwargs)
 
-        @restful.marshal_with(fields)
+        # Expect pagination arguments
+        list_parser.add_argument('page', type=int, default=0)
+        list_parser.add_argument('per_page', type=int, default=100)
+        list_parser.add_argument('select', type=str,
+                                 default=','.join(fields.keys()))
+
         def get_list(self):
-            model = self.__model__
             args = list_parser.parse_args()
-            query = model.queryset
+            query = self.__model__.queryset
+
             # Filters
             for field in resource_metadata.schema.get('fields', []):
                 # JSON properties names are camelCase
@@ -172,12 +194,17 @@ class ResourcesMaker(object):
                 values = args[property_name]
                 if values is not None:
                     query = query.in_(**{column_name: values})
+
             # Pagination
             query = query.offset(args['page'] * args['per_page'])
             query = query.limit(args['per_page'])
 
             result = query.all()
-            return result
+
+            # Display only the selected fields
+            selected_fields = filter_dict(fields, args['select'].split(','))
+
+            return restful.marshal(result, selected_fields)
 
         list_ = type('{}List'.format(classname), (restful.Resource, ), {
             'get': get_list,
@@ -186,12 +213,19 @@ class ResourcesMaker(object):
         })
 
         # Create Resource Single class
-        @restful.marshal_with(fields)
+        single_parser = RequestParser()
+        single_parser.add_argument('select', type=str,
+                                   default=','.join(fields.keys()))
+
         def get_single(self, pk):
-            model = self.__model__
-            query = model.queryset
+            args = single_parser.parse_args()
+            query = self.__model__.queryset
             result = query.get(pk)
-            return result
+
+            # Display only the selected fields
+            selected_fields = filter_dict(fields, args['select'].split(','))
+
+            return restful.marshal(result, selected_fields)
 
         single = type(classname, (restful.Resource, ), {
             'get': get_single,
